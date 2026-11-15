@@ -37,6 +37,16 @@ describe("setup prompts", () => {
     )
   })
 
+  test("creates a Solid Vite app from Solid's starter with one copy of the core", () => {
+    const prompt = setupPrompt({ stackId: "solid", projectId: "vite", site })
+    expect(prompt).toContain(
+      "create the project first: npm init solid@latest . -- --solid --ts --template bare --no-devtools\n"
+    )
+    expect(prompt).toContain(
+      `2. Add optimizeDeps: { exclude: ["@ui-sdk/core"] } to vite.config.ts, so the app and @ui-sdk/solid share one copy of the core in development.\n3. Import the default styles once`
+    )
+  })
+
   test("imports web.css after installing", () => {
     const prompt = setupPrompt({ stackId: "react", projectId: "next", site })
     expect(prompt).toContain(

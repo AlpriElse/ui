@@ -93,7 +93,11 @@ const stacks = [
       {
         id: "vite",
         name: "Vite",
-        create: "npm create vite@latest . -- --template solid-ts",
+        create:
+          "npm init solid@latest . -- --solid --ts --template bare --no-devtools",
+        steps: [
+          `Add optimizeDeps: { exclude: ["@ui-sdk/core"] } to vite.config.ts, so the app and @ui-sdk/solid share one copy of the core in development.`,
+        ],
       },
       {
         id: "start",
