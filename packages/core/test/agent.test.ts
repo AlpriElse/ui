@@ -28,6 +28,7 @@ import { select } from "../src/components/select/select"
 import { separator } from "../src/components/separator/separator"
 import { slider } from "../src/components/slider/slider"
 import { tabs } from "../src/components/tabs/tabs"
+import { tokenInput } from "../src/components/token-input/token-input"
 import { toolbar } from "../src/components/toolbar/toolbar"
 import { tree } from "../src/components/tree/tree"
 import { triggerMenu } from "../src/components/trigger-menu/trigger-menu"
@@ -733,6 +734,53 @@ describe("agent", () => {
     })
     expect(outcome.ok, outcome.error?.message).toBe(true)
     expect(instance.get().value).toEqual(["theo", "ana"])
+  })
+
+  test("setValue takes one value or label for a list, like a multiple combobox's", async () => {
+    const agent = createAgent()
+    const instance = combobox({
+      id: "watchers",
+      multiple: true,
+      items: [
+        { value: "theo", label: "Theo Laurent" },
+        { value: "ana", label: "Ana Ruiz" },
+      ],
+    })
+    const el = document.body.appendChild(document.createElement("input"))
+    el.setAttribute("aria-label", "Watchers")
+    cleanups.push(bind(instance.part("input"), el), () => instance.destroy())
+    for (const [text, value] of [
+      ["ana", ["ana"]],
+      ["Theo Laurent", ["theo"]],
+    ] as const) {
+      const outcome = await agent.act({
+        steps: [{ ref: "Watchers", action: "setValue", args: [text] }],
+      })
+      expect(outcome.ok, outcome.error?.message).toBe(true)
+      expect(instance.get().value).toEqual(value)
+    }
+  })
+
+  test("setValue reads a token input's text as tokens, not as a list of one", async () => {
+    const agent = createAgent()
+    const instance = tokenInput({ id: "prompt" })
+    const el = document.body.appendChild(document.createElement("div"))
+    el.setAttribute("aria-label", "Prompt")
+    cleanups.push(bind(instance.part("editor"), el), () => instance.destroy())
+    const outcome = await agent.act({
+      steps: [
+        {
+          ref: "Prompt",
+          action: "setValue",
+          args: ["Ask [@Ada](mention:ada)"],
+        },
+      ],
+    })
+    expect(outcome.ok, outcome.error?.message).toBe(true)
+    expect(instance.api.getValue()).toMatchObject([
+      "Ask ",
+      { type: "mention", label: "Ada" },
+    ])
   })
 
   test("setValue refuses a disabled item, by its label or its value, as a person can't choose it", async () => {
@@ -2171,6 +2219,25 @@ describe("agent act", () => {
       steps: [{ ref: "Data retention", action: "setValue", args: ["a lot"] }],
     })
     expect(outcome.error?.message).toMatch(/takes a number/)
+  })
+
+  test("a number field refuses text with grouped digits, which would read as the first group", async () => {
+    const agent = createAgent()
+    const instance = numberInput({ id: "price", defaultValue: 10 })
+    const el = document.body.appendChild(document.createElement("input"))
+    el.setAttribute("aria-label", "Price")
+    cleanups.push(bind(instance.part("control"), el), () => instance.destroy())
+    for (const text of ["1,499.5", "1 499", "1.499,5"]) {
+      const outcome = await agent.act({
+        steps: [{ ref: "Price", action: "setValue", args: [text] }],
+      })
+      expect(outcome.error?.message).toMatch(/takes a number/)
+    }
+    expect(instance.get().value).toBe(10)
+    await agent.act({
+      steps: [{ ref: "Price", action: "setValue", args: ["1499"] }],
+    })
+    expect(instance.get().value).toBe(1499)
   })
 
   test("a select with a few items shows them", () => {
