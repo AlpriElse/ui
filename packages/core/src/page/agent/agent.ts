@@ -151,6 +151,8 @@ const internalOf = (instance: PrimitiveInstance) =>
       internal?: {
         keyOf?: (value: unknown) => string
         elementOf?: (key: string) => Element | undefined
+        allowCustomValue?: () => boolean
+        options?: () => { emptyItems?: unknown }
       }
     }
   ).internal
@@ -168,10 +170,17 @@ function fromData(
     return
   }
   const out: { value: string; label: string }[] = []
+  // An item known before, like one a list also shows while its query is empty, is listed once.
+  const listed = new Set(known)
+  const push = (value: unknown, label: string) => {
+    if (!listed.has(key(value))) {
+      out.push({ value: String(value), label })
+      known?.add(key(value))
+    }
+  }
   const add = (item: unknown) => {
     if (typeof item === "string") {
-      out.push({ value: item, label: item })
-      known?.add(key(item))
+      push(item, item)
     } else if (item && typeof item === "object") {
       const entry = item as {
         type?: string
@@ -184,8 +193,7 @@ function fromData(
       if (entry.type === "group") {
         entry.items?.forEach(add)
       } else if (entry.type !== "separator") {
-        out.push({ value: String(entry.value), label: entry.label ?? "" })
-        known?.add(key(entry.value))
+        push(entry.value, entry.label ?? "")
         if (entry.disabled === true) {
           disabled?.add(key(entry.value))
         }
@@ -198,20 +206,26 @@ function fromData(
   return out
 }
 
-// A component's items as data, from its state's `items` unless its `agent` key says where they are.
+// A component's items as data, from its state's `items` unless its `agent` key says where they
+// are, then the ones a list shows while its query is empty, like recent choices.
 function dataOf(
   entry: Entry,
   instance: PrimitiveInstance,
   disabled?: Set<string>,
-  known?: Set<string>
+  known = new Set<string>()
 ) {
-  return fromData(
+  const key = keyFor(instance)
+  const items = fromData(
     entry.agent?.items?.(instance.api) ??
       (instance.get() as { items?: unknown }).items,
     disabled,
-    keyFor(instance),
+    key,
     known
   )
+  const empty =
+    items &&
+    fromData(internalOf(instance)?.options?.().emptyItems, disabled, key, known)
+  return empty ? [...items, ...empty] : items
 }
 
 // The values of the items a person can't choose, like a disabled option, from the list's data and its elements.
@@ -1322,12 +1336,21 @@ function createAgent(
           `${entry.component} ${entry.ref} takes no ${action} now. It takes: ${actions.join(", ") || "nothing"}.${actions.includes("press") ? pressable(instance) : ""}`
         )
       }
+      // A combobox with `allowCustomValue` takes text that isn't an item.
+      const closed =
+        entry.agent?.closed && !internalOf(instance)?.allowCustomValue?.()
       // A number from text, like "90 days" on a slider, since a slider or number field given text would hold no number.
       const state = instance.get() as {
         value?: unknown
         min?: unknown
         max?: unknown
       }
+      const key = keyFor(instance)
+      // A value it already holds stays, like a chip whose item the list no longer shows.
+      const holds = (value: unknown) =>
+        [state.value]
+          .flat()
+          .some((held) => held != null && key(held) === key(value))
       const numeric =
         typeof state.min === "number" ||
         typeof state.max === "number" ||
@@ -1369,21 +1392,25 @@ function createAgent(
               `"${args[0]}" names ${found.length} items in ${name}: ${found.map((item) => item.value).join(", ")}. Use a value.`
             )
           }
-          // A closed list refuses text that names none of its items, but a
-          // select's search text isn't an item. The first 20 keep the error short.
+          // A closed list refuses text that names none of its items, but a select's
+          // search text isn't an item. Data with no items is a list with none. The
+          // first 20 keep the error short.
           if (found.length === 1) {
             args = [found[0].value, ...args.slice(1)]
             named = true
           } else if (
-            items.length &&
-            entry.agent?.closed &&
-            action !== "setQuery"
+            (items.length || data) &&
+            closed &&
+            action !== "setQuery" &&
+            !holds(args[0])
           ) {
             throw new Error(
-              `No item "${args[0]}" in ${name}. Its items: ${items
-                .slice(0, 20)
-                .map((item) => item.label)
-                .join(", ")}${items.length > 20 ? ", …" : ""}.`
+              `No item "${args[0]}" in ${name}. Its items: ${
+                items
+                  .slice(0, 20)
+                  .map((item) => item.label)
+                  .join(", ") || "none"
+              }${items.length > 20 ? ", …" : ""}.`
             )
           }
         }
@@ -1417,21 +1444,21 @@ function createAgent(
       const elementOf = internalOf(instance)?.elementOf
       if (
         action === "setValue" &&
-        entry.agent?.closed &&
+        closed &&
         args[0] != null &&
         typeof args[0] !== "string"
       ) {
         const known = new Set<string>()
-        dataOf(entry, instance, undefined, known)
+        const data = dataOf(entry, instance, undefined, known)
         const items = await listItems(entry, instance, askToOpen, seeOpen)
         for (const item of items) {
           known.add(item.value)
         }
-        const key = keyFor(instance)
         const unknown = (Array.isArray(args[0]) ? args[0] : [args[0]]).find(
-          (value) => !known.has(key(value)) && !elementOf?.(key(value))
+          (value) =>
+            !known.has(key(value)) && !holds(value) && !elementOf?.(key(value))
         )
-        if ((items.length || elementOf) && unknown !== undefined) {
+        if ((items.length || elementOf || data) && unknown !== undefined) {
           throw new Error(
             `No item ${JSON.stringify(unknown)} in ${entry.label ?? entry.component} (${entry.ref}).`
           )
@@ -1450,7 +1477,6 @@ function createAgent(
         const value = (instance.get() as Record<string, unknown>)[
           action === "setChecked" ? "checked" : "value"
         ]
-        const key = keyFor(instance)
         const held = (Array.isArray(value) ? value : [value]).map(key)
         // Options that render only while the list is open are read by opening it, now. Only
         // a choice opens it: a popup's open() takes a payload, not an item.
@@ -1629,9 +1655,11 @@ function createAgent(
   ) {
     const state = instance.get() as Record<string, unknown>
     const api = instance.api as { setOpen?: (open: boolean) => void }
-    let items = dataOf(entry, instance) ?? renderedItems(bound(instance))
-    // An `agent` key's items are all it has, so opening it shows no more.
+    const data = dataOf(entry, instance)
+    let items = data ?? renderedItems(bound(instance))
+    // Data or an `agent` key's items are all it has, so opening it shows no more.
     if (
+      !data &&
       !items.length &&
       !entry.agent?.items &&
       beforeOpen &&
