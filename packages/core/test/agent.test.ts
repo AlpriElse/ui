@@ -2971,6 +2971,20 @@ describe("a primitive's agent key", () => {
       agent.snapshot().map((component) => component.component)
     ).not.toContain("separator")
   })
+
+  test("a toast region is listed only while it holds a toast", () => {
+    const agent = createAgent()
+    const toast = createToaster({ overlays: createOverlays() })
+    const instance = toastRegion({ id: "toasts", toaster: toast })
+    const el = document.createElement("div")
+    document.body.append(el)
+    cleanups.push(bind(instance.part("region"), el), () => instance.destroy())
+    const listed = () =>
+      agent.snapshot().map((component) => component.component)
+    expect(listed()).not.toContain("toast")
+    toast("Saved")
+    expect(listed()).toContain("toast")
+  })
 })
 
 describe("agent source", () => {
