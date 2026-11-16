@@ -574,6 +574,7 @@ function createPopupLayer<
   let enterPending = false
   // Opened during a pointerdown: the browser's own focus change follows, so focus waits a frame.
   let openedOnPress = false
+  let openedByKey = false
   let returnMode: ReturnMode = true
   let before: HTMLElement | undefined
   let openedWithoutTrigger = store.get().open
@@ -642,7 +643,17 @@ function createPopupLayer<
       openedFrom(
         active && active !== active.ownerDocument.body ? active : undefined
       )
-      openedWithoutTrigger = opener === "imperative"
+      // A key pressed away from the trigger, like its shortcut in a field,
+      // opened it from where focus was, unless that was a popup that just
+      // closed, like the last menu of a menubar.
+      const trigger = returnTrigger()
+      openedWithoutTrigger =
+        opener === "imperative" ||
+        (openedByKey &&
+          !!before &&
+          !findLayer(before) &&
+          !lastClosed() &&
+          !(trigger && composedContains(trigger, before)))
       const exiting = !!shown
       store.set({ mounted: true } as Partial<State>)
       // Reopened while animating out, it attaches again: the close already let
@@ -664,6 +675,7 @@ function createPopupLayer<
     focusPending = false
     enterPending = false
     opener = "imperative"
+    openedByKey = false
     const closed = observer?.(false)
     const el = shown?.el
     if (layer) {
@@ -1450,6 +1462,7 @@ function createPopupLayer<
     opening(by: PopupOpener, event?: Event) {
       opener = by
       openedOnPress = event?.type === "pointerdown"
+      openedByKey = event?.type === "keydown"
     },
     opener: () => opener,
     // For the popup's control only: hears every open and close first, from any
