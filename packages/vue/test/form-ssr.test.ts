@@ -66,6 +66,29 @@ describe("server rendering text fields and forms", () => {
     expect(html).toContain('aria-invalid="true"')
   })
 
+  test.each([
+    [[true]],
+    [["valueMissing", true]],
+    [[true, true]],
+    [[undefined, true]],
+  ] as const)(
+    "errors shown on a server keep their own ids, and the first is described (%j)",
+    async (matches) => {
+      const html = await render(() =>
+        h(Field, { name: "email", invalid: true }, () => [
+          h(FieldLabel, () => "Email"),
+          h(Input),
+          ...matches.map((match, index) =>
+            h(FieldError, { match }, () => `Error ${index}`)
+          ),
+        ])
+      )
+      const { errors: ids, described } = errorIds(html)
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(described).toContain(ids[0])
+    }
+  )
+
   test("a field shows no errors before a submit, and none with invalid false", async () => {
     for (const invalid of [undefined, false]) {
       const html = await render(() =>
@@ -140,4 +163,12 @@ describe("server rendering text fields and forms", () => {
     ).toEqual([])
     warn.mockRestore()
   })
+})
+
+// The ids of the field's errors and of what its control's description names.
+const errorIds = (html: string) => ({
+  errors: [...html.matchAll(/<[^>]*data-slot="field-error"[^>]*>/g)].map(
+    ([tag]) => tag.match(/\sid="([^"]+)"/)![1]
+  ),
+  described: html.match(/<input[^>]*aria-describedby="([^"]+)"/)![1].split(" "),
 })

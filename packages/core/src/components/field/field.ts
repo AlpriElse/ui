@@ -157,6 +157,22 @@ function fieldApiBody(
     return false
   }
 
+  // The first error that shows takes `${id}-error`, which the control points
+  // at before binding; parts are made in render order, so server and
+  // hydration agree. An error in the page keeps it until it leaves.
+  let holder: string | undefined
+  const errorId = (state: FieldStore, key: string) => {
+    const first =
+      holder ??
+      [...parts()].find(
+        (part) =>
+          part.slot === "error" &&
+          (part.props as { id?: string }).id === undefined &&
+          errorShown(state, api, part.props as FieldErrorProps)
+      )?.key
+    return !key || first === key ? `${id}-error` : `${id}-error-${key}`
+  }
+
   // The controls the field last read, so one leaving the page reads them again.
   let wired: HTMLElement[] = []
 
@@ -217,32 +233,46 @@ function fieldApiBody(
       }
     },
     internal: {
+      errorId,
       bindRoot(el: HTMLElement) {
         root = el
         return bindRoot(el)
       },
-      // Parts register a microtask after they bind: Vue binds them in the middle
-      // of hydrating, when a render would be lost.
+      // A microtask after binding, since Vue binds mid-hydration. Each takes out
+      // only its own entry, so two parts sharing an id don't drop each other.
       register(list: "labels" | "descriptions" | "errors", partId: string) {
         let active = true
+        let added = false
         queueMicrotask(() => {
           if (active) {
-            store.set({
-              [list]: [
-                ...store.get()[list].filter((item) => item !== partId),
-                partId,
-              ],
-            })
+            added = true
+            store.set({ [list]: [...store.get()[list], partId] })
           }
         })
         return () => {
           active = false
-          queueMicrotask(() =>
-            store.set({
-              [list]: store.get()[list].filter((item) => item !== partId),
-            })
-          )
+          queueMicrotask(() => {
+            const items = store.get()[list]
+            const index = items.indexOf(partId)
+            if (added && index !== -1) {
+              store.set({ [list]: items.filter((_, at) => at !== index) })
+            }
+          })
         }
+      },
+      holdError(el: HTMLElement, key: string) {
+        if (el.id !== `${id}-error`) {
+          return () => {}
+        }
+        holder = key
+        // A hidden error, like one in React's `<Activity>`, keeps its element
+        // and its id, so it lets go only once that element leaves the page.
+        return () =>
+          queueMicrotask(() => {
+            if (holder === key && !el.isConnected) {
+              holder = undefined
+            }
+          })
       },
       // The browser's message for the current problem, which an empty error shows.
       message: () => store.get().validity.message,
@@ -537,25 +567,30 @@ const fieldPrimitive = /* @__PURE__ */ definePrimitive({
         registerById(el, (id) => api.internal.register("descriptions", id)),
     }),
 
-    error: slot<FieldErrorProps, FieldErrorState>({
-      // Each error with `match` is a part of its own, with an id made for it
-      // when left out, so an invalid submit reads every error's own `match`.
-      // One without takes `${id}-error`, which the control points at before
-      // the field binds.
-      props: { id: "id", match: matchAttribute },
+    error: slot<FieldErrorProps & { value?: string }, FieldErrorState>({
+      props: {
+        id: "id",
+        match: matchAttribute,
+        // Internal: renderers key each error by a made value, so an invalid
+        // submit reads every error's own `match`. Field has no `field` slot,
+        // so no element attribute either.
+        value: { kind: "string", from: "field" },
+      },
       present: (state, { props, api }) => errorShown(state, api, props),
       state: (state, { api }) => errorState(state, api),
       attrs: (state, { id, key, props, api }) => ({
-        id: props.id ?? (key ? `${id}-error-${key}` : `${id}-error`),
+        id: props.id ?? api.internal.errorId(state, key),
         ...dataAttrs(state, api),
       }),
-      bind: (el, { api }) => {
+      bind: (el, { api, key }) => {
         const unregister = registerById(el, (id) =>
           api.internal.register("errors", id)
         )
+        const unhold = api.internal.holdError(el, key)
         const unannounce = api.internal.announce(el)
         return () => {
           unregister()
+          unhold()
           unannounce()
         }
       },

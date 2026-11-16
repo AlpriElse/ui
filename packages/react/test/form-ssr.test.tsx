@@ -42,6 +42,31 @@ describe("server rendering text fields and forms", () => {
     expect(html).not.toContain("data-valid")
   })
 
+  test.each([
+    [[true]],
+    [["valueMissing", true]],
+    [[true, true]],
+    [[undefined, true]],
+  ] as const)(
+    "errors shown on a server keep their own ids, and the first is described (%j)",
+    (matches) => {
+      const html = renderToString(
+        <Field name="email" invalid>
+          <FieldLabel>Email</FieldLabel>
+          <Input type="email" />
+          {matches.map((match, index) => (
+            <FieldError key={index} match={match}>
+              Error {index}
+            </FieldError>
+          ))}
+        </Field>
+      )
+      const { errors: ids, described } = errorIds(html)
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(described).toContain(ids[0])
+    }
+  )
+
   test("a field shows no errors before a submit, and none with invalid={false}", () => {
     for (const invalid of [undefined, false]) {
       const html = renderToString(
@@ -76,4 +101,12 @@ describe("server rendering text fields and forms", () => {
     expect(html).toContain('data-slot="input-group"')
     expect(html).not.toContain("Clear")
   })
+})
+
+// The ids of the field's errors and of what its control's description names.
+const errorIds = (html: string) => ({
+  errors: [...html.matchAll(/<[^>]*data-slot="field-error"[^>]*>/g)].map(
+    ([tag]) => tag.match(/\sid="([^"]+)"/)![1]
+  ),
+  described: html.match(/<input[^>]*aria-describedby="([^"]+)"/)![1].split(" "),
 })

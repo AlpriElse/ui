@@ -194,15 +194,16 @@ const FieldError = withElement(
           fieldOutsideErrorShown({ match: props.match })
         )
       }
-      // Only an error with `match` needs an id of its own. One without takes the
-      // field's, which the control points at before the field binds.
-      const id = () =>
-        (attrs.id as string | undefined) ??
-        (props.match === undefined ? undefined : made)
+      // Each error is its own part, keyed by a made value. Core gives the first one
+      // that shows the id the control points at before the field binds.
       return usePart(
         field,
         "error",
-        () => ({ id: id(), match: props.match }),
+        () => ({
+          id: attrs.id as string | undefined,
+          value: made,
+          match: props.match,
+        }),
         undefined,
         element
       )
