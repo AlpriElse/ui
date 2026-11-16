@@ -7,6 +7,7 @@ import {
   focusables,
   hasBoolean,
   ids,
+  isReadOnly,
   isRtl,
   isUnreachable,
   roleOf,
@@ -315,10 +316,29 @@ async function radioGroup(context: PatternContext) {
     return
   }
   const start = await enter(context, composite)
+  // A read-only group moves focus and keeps the radio it has checked.
+  const readOnly = isReadOnly(group)
+  let held: Element | undefined = checked[0]
+  const kept = (key: string, radio: Element) => {
+    if (isChecked(radio) && radio !== checked[0]) {
+      context.problem(
+        radio,
+        `${key} checked it, but the group's aria-readonly="true" says it can't change (ARIA: aria-readonly).`
+      )
+    } else if (held && !isChecked(held)) {
+      context.problem(
+        held,
+        `${key} unchecked it, but the group's aria-readonly="true" says it can't change (ARIA: aria-readonly).`
+      )
+      held = undefined
+    }
+  }
   // Space checks a focused radio that isn't checked, which can't be undone.
   if (start && !isChecked(start) && !isDisabledElement(start)) {
     await context.press("Space")
-    if (!isChecked(start)) {
+    if (readOnly) {
+      kept("Space", start)
+    } else if (!isChecked(start)) {
       context.problem(
         start,
         "Space should check the focused radio (APG radio group)."
@@ -336,7 +356,9 @@ async function radioGroup(context: PatternContext) {
     wraps: true,
     homeEnd: false,
     onMove: (key, radio) => {
-      if (!isChecked(radio) && !isDisabledElement(radio)) {
+      if (readOnly) {
+        kept(key, radio)
+      } else if (!isChecked(radio) && !isDisabledElement(radio)) {
         context.problem(
           radio,
           `${key} should check the radio it moves to (APG radio group).`
