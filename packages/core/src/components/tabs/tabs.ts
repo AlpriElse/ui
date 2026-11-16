@@ -290,6 +290,10 @@ function tabsApiBody(
   let changed = false
   // The first check picks a default, which is not a change.
   let checked = false
+  // The default's tab can bind after the others, like inside Suspense, so the
+  // first tab stands in until it does, unless someone picks another.
+  let awaited = options().defaultValue ?? null
+  let standIn: string | null = null
   // Run after tabs come or go, which can move the selected tab without resizing it.
   const tabsChanged = new Set<() => void>()
 
@@ -324,12 +328,25 @@ function tabsApiBody(
     if (list.length) {
       const initial = !checked
       checked = true
-      const { value } = store.get()
-      if (!controlled() && !list.some((tab) => tab.key === value)) {
+      const has = (key: string | null) => list.some((tab) => tab.key === key)
+      let { value } = store.get()
+      if (controlled()) {
+        awaited = null
+      }
+      if (awaited !== null && has(awaited)) {
+        const from = value
+        value = awaited
+        awaited = standIn = null
+        if (from !== value) {
+          store.set({ value })
+        }
+      }
+      if (!controlled() && !has(value)) {
         const first = list.find(enabled)
         // The first pick is the default, so it calls nothing. A selected tab
         // that leaves the page later is a change.
         if (first && initial) {
+          standIn = awaited === null ? null : first.key
           store.set({ value: first.key })
         } else if (first) {
           change("value", first.key, { reason: "item-removed" })
@@ -427,6 +444,9 @@ function tabsApiBody(
     }
     const from = previous
     previous = state.value
+    if (state.value !== standIn) {
+      awaited = null
+    }
     changed = true
     store.set(selecting({ ...state, value: from }, state.value))
     roving.check()
