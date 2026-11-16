@@ -28,6 +28,7 @@ const listening = new WeakSet<Document>()
 let hovered: HandleTarget[] = []
 let active: HandleTarget[] = []
 let activeTouch = false
+let releaseTouch = () => {}
 
 /** Makes a handle findable by presses and hovers near it. Returns the cleanup. */
 function registerHandle(target: HandleTarget) {
@@ -38,14 +39,18 @@ function registerHandle(target: HandleTarget) {
     if (hovered.includes(target)) {
       setHovered(hovered.filter((other) => other !== target))
     }
-    active = active.filter((other) => other !== target)
-    updateCursor(target.el.ownerDocument)
+    releaseHandle(target)
   }
 }
 
 /** Ends a handle's drag in the page's eyes: its cursor and the drag styles go. */
 function releaseHandle(target: HandleTarget) {
   active = active.filter((other) => other !== target)
+  // A handle removed mid-drag never hears its touchend, so the drag's end,
+  // not the finger's, lets the page pan again.
+  if (!active.length) {
+    releaseTouch()
+  }
   updateCursor(target.el.ownerDocument)
 }
 
@@ -143,6 +148,9 @@ function listen(doc: Document) {
     }
     active = hits
     activeTouch = event.pointerType === "touch"
+    if (activeTouch) {
+      holdTouch(doc)
+    }
     for (const hit of hits) {
       hit.start(event)
     }
@@ -184,6 +192,28 @@ function listen(doc: Document) {
     setHovered([])
     updateCursor(doc)
   })
+}
+
+// A press in the touch hit area but beside the handle lands where the page
+// can pan, and the browser would cancel the drag to scroll.
+function holdTouch(doc: Document) {
+  releaseTouch()
+  const hold = (event: TouchEvent) => event.preventDefault()
+  const end = (event: TouchEvent) => {
+    if (!event.touches.length) {
+      releaseTouch()
+    }
+  }
+  releaseTouch = () => {
+    doc.removeEventListener("touchmove", hold, true)
+    doc.removeEventListener("touchend", end, true)
+    doc.removeEventListener("touchcancel", end, true)
+    releaseTouch = () => {}
+  }
+  // Capturing, so a page handler that stops the event can't keep it held.
+  doc.addEventListener("touchmove", hold, { capture: true, passive: false })
+  doc.addEventListener("touchend", end, true)
+  doc.addEventListener("touchcancel", end, true)
 }
 
 function setHovered(next: HandleTarget[]) {
