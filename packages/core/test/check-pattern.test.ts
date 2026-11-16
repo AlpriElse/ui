@@ -20,6 +20,7 @@ import { toolbar } from "../src/components/toolbar/toolbar"
 import { tree } from "../src/components/tree/tree"
 import { danglingReferences } from "../src/testing/aria"
 import { checkPattern } from "../src/testing/check-pattern"
+import { keys } from "../src/testing/input"
 import { mount } from "../src/testing/mount"
 import { popupOf, triggerOf } from "../src/testing/pattern-context"
 
@@ -699,6 +700,64 @@ test("a native radio group passes when styles hide its first radio, which Tab sk
       <label><input type="radio" name="size" value="m">Medium</label>
     </div>`)
   await expect(checkPattern(root, "radio-group")).resolves.toBeUndefined()
+})
+
+test("a native range input passes as a slider, right to left too", async () => {
+  for (const dir of ["ltr", "rtl"]) {
+    const root = render(
+      `<label dir="${dir}">Volume <input type="range" min="0" max="10" value="5"></label>`
+    )
+    await expect(
+      checkPattern(root.querySelector("input")!, "slider")
+    ).resolves.toBeUndefined()
+    root.parentElement!.remove()
+  }
+})
+
+test("a native radio group passes, its arrows moving and checking the next radio", async () => {
+  const root = render(`
+    <div role="radiogroup" aria-label="Size">
+      <label><input type="radio" name="size" value="s" checked>Small</label>
+      <label><input type="radio" name="size" value="m" disabled>Medium</label>
+      <label><input type="radio" name="size" value="l">Large</label>
+    </div>`)
+  await expect(checkPattern(root, "radio-group")).resolves.toBeUndefined()
+})
+
+test("arrows on a native range input stay on its steps, and step any moves a hundredth", async () => {
+  const root = render(`<div>
+    <input id="steps" type="range" min="0" max="10" step="3" value="6">
+    <input id="any" type="range" min="0" max="1" step="any" value="0.5">
+  </div>`)
+  const steps = root.querySelector<HTMLInputElement>("#steps")!
+  steps.focus()
+  await keys(document, ["ArrowRight", "ArrowRight"])
+  expect(steps.value).toBe("9")
+  await keys(document, ["End"])
+  expect(steps.value).toBe("9")
+  const any = root.querySelector<HTMLInputElement>("#any")!
+  any.focus()
+  await keys(document, ["ArrowRight"])
+  expect(any.value).toBe("0.51")
+})
+
+test("arrows on a native radio click the next one it can see, so the click can be cancelled", async () => {
+  const root = render(`<div>
+    <input type="radio" name="size" value="s" checked>
+    <input type="radio" name="size" value="m" style="visibility: hidden">
+    <input type="radio" name="size" value="l">
+  </div>`)
+  const [small, , large] = root.querySelectorAll("input")
+  const clicked: string[] = []
+  root.addEventListener("click", (event) => {
+    clicked.push((event.target as HTMLInputElement).value)
+    event.preventDefault()
+  })
+  small.focus()
+  await keys(document, ["ArrowDown"])
+  expect(clicked).toEqual(["l"])
+  expect(document.activeElement).toBe(large)
+  expect(small.checked).toBe(true)
 })
 
 test("a hand-made listbox passes when the slot it renders an option in is hidden", async () => {
