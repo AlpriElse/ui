@@ -237,12 +237,48 @@ async function checkEnterActivates(
   }
 }
 
+// jsdom keeps `inert` as a property and never writes the attribute.
+function isInert(el: Element) {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    if ((node as HTMLElement).inert === true || node.hasAttribute("inert")) {
+      return true
+    }
+  }
+  return false
+}
+
+// The page, or a part of it: inert, or something to read or use, unlike a
+// backdrop or a focus guard.
+const isPage = (el: Element) =>
+  !el.matches("script, style, template") &&
+  (isInert(el) || !!el.textContent?.trim() || tabStops(el).length > 0)
+
+// A modal dialog makes the page behind it inert: its trigger, or without one,
+// all the content beside it, or beside the nearest element around it that has
+// content beside it, like the page beside a dialog's container.
+function isPageInert(popup: Element) {
+  const trigger = triggerOf(popup)
+  if (trigger) {
+    return isInert(trigger)
+  }
+  for (let node = popup; node.parentElement; node = node.parentElement) {
+    const page = [...node.parentElement.children].filter(
+      (el) => el !== node && isPage(el)
+    )
+    if (page.length) {
+      return page.every((el) => isInert(el))
+    }
+  }
+  return false
+}
+
 /**
  * Dialog and alert dialog: a name, focus inside, and Escape. A modal one, one
- * that keeps Tab inside or makes the page behind it inert, also needs
+ * that makes the page behind it inert, also keeps Tab inside and needs
  * `aria-modal="true"`, which goes past the APG's letter: its dialog pattern is
- * modal, and says so only in prose. A non-modal one, like a popover with role
- * dialog, lets Tab move on.
+ * modal, and says so only in prose. One that only keeps Tab inside leaves the
+ * page usable, so it has no `aria-modal`. A non-modal one, like a popover with
+ * role dialog, lets Tab move on.
  */
 async function modal(context: PatternContext, role: "dialog" | "alertdialog") {
   const source = role === "dialog" ? "dialog (modal)" : "alert dialog"
@@ -273,9 +309,7 @@ async function modal(context: PatternContext, role: "dialog" | "alertdialog") {
   // A modal dialog keeps Tab and Shift+Tab inside, past the last stop and the
   // first; a non-modal one lets Tab move on, and focus comes back for Escape.
   const first = context.doc.activeElement as HTMLElement | null
-  const pageInert = [...context.doc.body.children].some(
-    (el) => !el.contains(popup) && el.closest("[inert]") !== null
-  )
+  const pageInert = isPageInert(popup)
   const stops = tabStops(popup).length
   let trapped = true
   for (const key of ["Tab", "Shift+Tab"]) {
@@ -297,8 +331,7 @@ async function modal(context: PatternContext, role: "dialog" | "alertdialog") {
       )
     }
   }
-  const modal =
-    trapped || pageInert || popup.getAttribute("aria-modal") === "true"
+  const modal = pageInert || popup.getAttribute("aria-modal") === "true"
   if (modal && !trapped) {
     context.problem(
       popup,
