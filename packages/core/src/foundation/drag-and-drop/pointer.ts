@@ -81,6 +81,7 @@ function bindDrag(
   down: PointerEvent,
   options: BindDragOptions
 ) {
+  followed.add(down)
   const view = el.ownerDocument.defaultView ?? window
   const pointerId = down.pointerId
   let frame = 0
@@ -235,6 +236,10 @@ function bindDrag(
 
   return stop
 }
+
+// The presses a drag follows, so a gesture around one, like a sheet's swipe, leaves it alone.
+const followed = new WeakSet<Event>()
+const isDragPress = (event: Event) => followed.has(event)
 
 // A mouse is always primary, and a synthetic event without a type says nothing.
 const isSecondary = (event: PointerEvent) =>
@@ -465,6 +470,7 @@ export {
   createDragSession,
   dragThreshold,
   isDrag,
+  isDragPress,
   type PointerSample,
   repeatWhileHeld,
   swallowNextClick,

@@ -19,7 +19,7 @@ import { nearestIndex } from "../motion/projection"
 import { settleTime, solveSpring, springLinearEasing } from "../motion/spring"
 import { createVelocityTracker } from "../motion/velocity"
 import { on } from "../kernel/events"
-import { swallowNextClick } from "../drag-and-drop/pointer"
+import { isDragPress, swallowNextClick } from "../drag-and-drop/pointer"
 import {
   axisPoint,
   scrollContext,
@@ -77,7 +77,11 @@ function createPointerDriver(options: SheetDriverOptions) {
   let pointerId: number | null = null
   let dragging = false
   let mouseDragged = false
+  // Kept to see whether a drag inside took the press, like a slider's: it
+  // isn't the sheet's. A framework's own listener runs after the sheet's.
+  let press: PointerEvent | null = null
   let targetId: string | null = null
+  let caught: string | null = null
   const point = { x: 0, y: 0 }
   const tracker = createVelocityTracker({
     horizon: options.config().physics.velocityHorizon,
@@ -333,7 +337,9 @@ function createPointerDriver(options: SheetDriverOptions) {
   }
 
   function onTouchStart(event: TouchEvent) {
-    if (touch || event.touches.length > 1 || closing) {
+    const taken = press !== null && isDragPress(press)
+    press = null
+    if (touch || event.touches.length > 1 || closing || taken) {
       return
     }
     if (!options.owns(event.target) || isIgnored(event.target)) {
@@ -455,6 +461,7 @@ function createPointerDriver(options: SheetDriverOptions) {
   }
 
   function onPointerDown(event: PointerEvent) {
+    press = event
     if (
       event.pointerType === "touch" ||
       event.button !== 0 ||
@@ -474,6 +481,8 @@ function createPointerDriver(options: SheetDriverOptions) {
     }
     pointerId = event.pointerId
     mouseDragged = false
+    caught =
+      state.phase === "settling" && state.targetIndex >= 0 ? targetId : null
     coast = null
     tracker.reset()
     axisPoint(options.side(), event.clientX, event.clientY, point)
@@ -497,6 +506,9 @@ function createPointerDriver(options: SheetDriverOptions) {
   function onPointerMove(event: PointerEvent) {
     if (event.pointerId !== pointerId) {
       return
+    }
+    if (press && isDragPress(press)) {
+      return release(event, 0, caught)
     }
     // Engines without coalescing, and synthetic events, give an empty list.
     const coalesced = event.getCoalescedEvents?.()
@@ -534,13 +546,37 @@ function createPointerDriver(options: SheetDriverOptions) {
     if (event.pointerId !== pointerId) {
       return
     }
+    if (press && isDragPress(press)) {
+      return release(event, 0, caught)
+    }
+    release(
+      event,
+      event.type === "pointercancel" ? 0 : tracker.velocity(event.timeStamp)
+    )
+  }
+
+  // `resume` is the snap point a settle was heading to when the press caught
+  // it: the sheet goes on there, since letting go mid-settle could dismiss it.
+  function release(
+    event: PointerEvent,
+    velocity: number,
+    resume: string | null = null
+  ) {
     pointerId = null
+    press = null
     offPointer.forEach((off) => off())
     offPointer = []
     sheet.style.removeProperty("user-select")
-    const velocity =
-      event.type === "pointercancel" ? 0 : tracker.velocity(event.timeStamp)
-    dispatch({ type: "up", time: event.timeStamp, velocity }, event)
+    const time = event.timeStamp
+    const index = options
+      .config()
+      .snapPoints.findIndex((point) => point.id === resume)
+    if (resume !== null && index >= 0) {
+      state = initialState(state.extent, index)
+      dispatch({ type: "snap-to", time, id: resume, reason: "imperative" })
+    } else {
+      dispatch({ type: "up", time, velocity }, event)
+    }
     if (mouseDragged) {
       swallowNextClick(doc)
     }
