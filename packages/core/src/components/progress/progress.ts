@@ -6,6 +6,7 @@ import {
   formatGaugeValue,
   indicatorStyle,
   labelId,
+  labelledBy,
   percentBetween,
   roundPercent,
   type GaugeOptions,
@@ -13,6 +14,7 @@ import {
 } from "../../foundation/gauge/gauge"
 import { dev } from "#dev"
 import { checkName } from "#name-check"
+import { flagWhileBound } from "../../foundation/kernel/bound-keys"
 import { css } from "../../foundation/kernel/inline-style"
 import { bindPageLocale } from "../../foundation/text/locale"
 import { definePrimitive } from "../../foundation/kernel/primitive"
@@ -66,6 +68,7 @@ type State = GaugeSettings & {
   value: number | null
   // How many Label parts are on the page. Any of them names the bar.
   labels: number
+  bound: boolean
 }
 
 const valueOf = (options: ProgressOptions) =>
@@ -123,6 +126,7 @@ const progressPrimitive = /* @__PURE__ */ definePrimitive({
   state: (options: ProgressOptions): State => ({
     ...settings(options),
     labels: 0,
+    bound: false,
     pageLocale: null,
   }),
   sync: settings,
@@ -137,7 +141,7 @@ const progressPrimitive = /* @__PURE__ */ definePrimitive({
         const percent = percentOf(state)
         return {
           ...gaugeAria(state.value, state),
-          "aria-labelledby": state.labels ? labelId(id) : undefined,
+          "aria-labelledby": labelledBy(state, id),
           ...statusAttrs(state),
           // For anything else that should follow the value, like a gradient stop.
           style:
@@ -152,6 +156,7 @@ const progressPrimitive = /* @__PURE__ */ definePrimitive({
         if (dev) {
           checkName(el, "Progress", { component: "progress", id })
         }
+        return flagWhileBound(store, "bound")
       },
     }),
     track: slot<{}, ProgressState>({
