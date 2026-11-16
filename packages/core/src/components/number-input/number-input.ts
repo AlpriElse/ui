@@ -1,4 +1,8 @@
-import { bindValueInput, bindInternals } from "../../foundation/forms/form"
+import {
+  bindValueInput,
+  bindInternals,
+  typedBeforeBind,
+} from "../../foundation/forms/form"
 import {
   atBound,
   canStep,
@@ -21,7 +25,7 @@ import type {
   PrimitiveOptions,
 } from "../../foundation/kernel/primitive-types"
 import { orientationOf } from "../../foundation/focus/collection"
-import { bindPageLocale } from "../../foundation/text/locale"
+import { bindPageLocale, pageLocale } from "../../foundation/text/locale"
 import { live } from "../../foundation/kernel/live"
 
 /**
@@ -403,6 +407,16 @@ const numberInputPrimitive = /* @__PURE__ */ definePrimitive({
         const write = () => {
           if (input.value !== store.get().text) {
             input.value = store.get().text
+          }
+        }
+        if (typedBeforeBind(input, store.get().text)) {
+          // The root reads the page's language after its parts bind, and the text parses in it.
+          if (store.get().pageLocale === null) {
+            store.set({ pageLocale: pageLocale(input) ?? null })
+          }
+          api.internal.type(input.value)
+          if (!input.matches(":focus")) {
+            api.internal.commitText()
           }
         }
         write()
