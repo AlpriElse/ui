@@ -752,7 +752,15 @@ function comboboxApiBody(
     if (!editable()) {
       return
     }
-    setQuery(text, { reason: "input-change", event, dirty: true })
+    const input = inputElement() as HTMLInputElement | undefined
+    if (
+      !setQuery(text, { reason: "input-change", event, dirty: true }) &&
+      input &&
+      input.value !== store.get().query
+    ) {
+      // Canceled: the input shows the text it had.
+      input.value = store.get().query
+    }
     const selected = selection.values()[0]
     if (
       !state.multiple &&
