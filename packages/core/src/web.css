@@ -1851,6 +1851,21 @@
       padding-inline-end: calc(var(--ui-spacing) * 8);
     }
 
+    /* The Date Picker stacks its parts. Here they share a row, and the hint takes the next one. */
+    &[data-slot="date-picker"]:not([data-mode="range"]) {
+      flex-flow: row wrap;
+      column-gap: 0;
+
+      /* With no width of its own to start from, the row would have room for the hint. */
+      & [data-slot="date-picker-input"] {
+        flex-basis: calc(var(--ui-spacing) * 8);
+      }
+
+      & > [data-slot="date-picker-hint"] {
+        flex-basis: 100%;
+      }
+    }
+
     & [data-slot="date-picker-trigger"] {
       position: relative;
       margin-inline-start: calc(var(--ui-spacing) * -7);
@@ -1868,6 +1883,20 @@
 
       & [data-slot="date-picker-trigger"] {
         margin-inline-start: 0;
+      }
+
+      /* Written trigger first, the trigger takes the offset and the clear button follows it. */
+      &:has(
+        > :is([data-slot="date-picker-trigger"], ui-date-picker-trigger)
+          ~ :is([data-slot="date-picker-clear"], ui-date-picker-clear)
+      ) {
+        & [data-slot="date-picker-trigger"] {
+          margin-inline-start: calc(var(--ui-spacing) * -13);
+        }
+
+        & [data-slot="date-picker-clear"] {
+          margin-inline-start: 0;
+        }
       }
     }
   }
