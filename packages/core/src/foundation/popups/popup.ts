@@ -581,9 +581,14 @@ function createPopupLayer<
   // returns to its own target, else the focus that the last close left.
   // Kept after a close, so a popup this one opened can still follow it.
   let upstream: (
-    take?: (target: HTMLElement) => boolean
+    take?: (target: HTMLElement) => boolean,
+    strict?: boolean
   ) => HTMLElement | undefined = () => undefined
-  let path: { node: Node; next: Node | null; previous: Node | null }[] = []
+  let path: {
+    node: Element
+    next: Element | null
+    previous: Element | null
+  }[] = []
   const returnTrigger = options.returnTrigger ?? options.trigger
   let place: (() => void) | undefined
   let checkPlacement: (() => void) | undefined
@@ -601,6 +606,13 @@ function createPopupLayer<
   deriveOpen({ store }, ["mounted"], (open) =>
     mountedAs(open) === open ? ({ mounted: open } as Partial<State>) : undefined
   )
+
+  function openedFrom(focused: HTMLElement | undefined) {
+    before = focused
+    const openerLayer = before && findLayer(before)
+    const openerTarget = openerLayer ? undefined : lastClosed()
+    upstream = openerLayer?.returnTarget ?? (() => openerTarget)
+  }
 
   let wasOpen = store.get().open
   store.subscribe(() => {
@@ -627,12 +639,10 @@ function createPopupLayer<
       enterPending = true
       returnMode = true
       const active = isBrowser ? activeElement() : null
-      before =
+      openedFrom(
         active && active !== active.ownerDocument.body ? active : undefined
+      )
       openedWithoutTrigger = opener === "imperative"
-      const openerLayer = before && findLayer(before)
-      const openerTarget = openerLayer ? undefined : lastClosed()
-      upstream = openerLayer?.returnTarget ?? (() => openerTarget)
       const exiting = !!shown
       store.set({ mounted: true } as Partial<State>)
       // Reopened while animating out, it attaches again: the close already let
@@ -738,43 +748,37 @@ function createPopupLayer<
   function returnChain(
     el: HTMLElement | undefined,
     take?: (target: HTMLElement) => boolean,
-    from = upstream
+    from = upstream,
+    strict = false
   ) {
-    const inherited = () => from(take)
+    const inherited = () => from(take, strict)
+    const nearby = () => neighbour(el, strict)
     return openedWithoutTrigger
-      ? [
-          () => before,
-          inherited,
-          returnTrigger,
-          () => neighbour(el),
-          options.trigger,
-        ]
-      : [
-          returnTrigger,
-          () => before,
-          inherited,
-          () => neighbour(el),
-          options.trigger,
-        ]
+      ? [() => before, inherited, returnTrigger, nearby, options.trigger]
+      : [returnTrigger, () => before, inherited, nearby, options.trigger]
   }
 
   // A popup opened from this one returns here after this one closed, trying
   // each target in turn with its own `take`. Reopened from that popup, each
   // leads back to the other, so the lookup stops there.
   let resolving = false
-  function returnTarget(take: (target: HTMLElement) => boolean = usable) {
+  function returnTarget(
+    take: (target: HTMLElement) => boolean = usable,
+    strict = false
+  ) {
     if (resolving) {
       return
     }
     resolving = true
     try {
-      return firstUsable(returnChain(shown?.el, take), take)
+      return firstUsable(returnChain(shown?.el, take, upstream, strict), take)
     } finally {
       resolving = false
     }
   }
 
-  function neighbour(el: HTMLElement | undefined) {
+  // With `strict`, what took the place of a trigger that left isn't a neighbour.
+  function neighbour(el: HTMLElement | undefined, strict = false) {
     const trigger = path[0]?.node
     // A trigger still in the page that can't take focus, like one disabled while
     // it was open, hands focus to what follows it, as one that left does. One
@@ -806,8 +810,17 @@ function createPopupLayer<
     }
     const { next, previous } = path[index]
     const parent = path[index + 1].node
-    const inPlace = (sibling: Node | null): sibling is Node =>
+    const inPlace = (sibling: Element | null): sibling is Element =>
       !!sibling?.isConnected && sibling.parentNode === parent
+    const closed = inPlace(next)
+      ? next.previousElementSibling === previous
+      : !next &&
+        (previous
+          ? inPlace(previous) && !previous.nextElementSibling
+          : !parent.firstElementChild)
+    if (strict && !closed) {
+      return
+    }
     const from = (node: Node, candidate: Node) =>
       node.contains(candidate) || isAfter(node, candidate)
     const after = inPlace(next)
@@ -835,7 +848,7 @@ function createPopupLayer<
     }
   }
 
-  function returnFocus(el: HTMLElement, from: typeof upstream) {
+  function returnFocus(el: HTMLElement, from: typeof upstream, strict = false) {
     const setting = options.finalFocus?.() ?? "trigger"
     if (setting === "none") {
       return
@@ -849,7 +862,7 @@ function createPopupLayer<
       restoreFocus(target)
       return activeElement() === target
     }
-    const chain = returnChain(el, take, from)
+    const chain = returnChain(el, take, from, strict)
     if (setting !== "trigger") {
       chain.unshift(() => resolveTarget(setting, el.ownerDocument))
     }
@@ -888,17 +901,17 @@ function createPopupLayer<
     const cleanups: (() => void)[] = []
     const trigger = options.trigger()
     const host = config.host?.() ?? el
-    // Mounted open, like a dialog an overlay manager opens, focus returns to
-    // what had it as the popup mounted, since no open recorded it.
+    // Mounted open, like a dialog a menu item opens, focus returns to what
+    // had it as the popup mounted, since no open recorded it.
     if (opener === "initial" && !before) {
       const active = activeElement()
-      if (
+      openedFrom(
         active &&
-        active !== active.ownerDocument.body &&
-        !composedContains(el, active)
-      ) {
-        before = active
-      }
+          active !== active.ownerDocument.body &&
+          !composedContains(el, active)
+          ? active
+          : undefined
+      )
     }
     el.removeAttribute("hidden")
     host.removeAttribute("hidden")
@@ -1386,7 +1399,26 @@ function createPopupLayer<
         }
         bound = undefined
         if (shown?.el === el) {
+          // Some frameworks remove the element first, and its focus is on the body by now.
+          const active = activeElement()
+          const held =
+            store.get().open &&
+            behavior.movesFocus &&
+            (!active ||
+              active === el.ownerDocument.body ||
+              composedContains(el, active))
+          const from = upstream
           hide()
+          // Removed from the page while open, like a dialog rendered only
+          // while it's open, focus goes back to what opened it. New content
+          // in its place keeps it, and what replaced the opener isn't a neighbour.
+          if (held) {
+            queueMicrotask(() => {
+              if (!bound && !el.isConnected && focusIsLost()) {
+                returnFocus(el, from, true)
+              }
+            })
+          }
         }
       }
     },
