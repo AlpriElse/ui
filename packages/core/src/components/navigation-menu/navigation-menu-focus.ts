@@ -1,7 +1,6 @@
-// Where keys move focus in a navigation menu: the APG's optional arrow keys
-// along the top-level items and through a panel's links, into a panel an
-// arrow key opened, and Shift+Tab back into a panel that renders elsewhere.
-// Tab itself stays the browser's, except where the popup layer hands it over.
+// Where keys move focus in a navigation menu: the APG's optional arrows, into
+// a panel an arrow key opened, and Tab around a panel that renders elsewhere.
+// Otherwise Tab stays the browser's, except where the popup layer takes it.
 import { documentOrder, isAfter } from "../../foundation/kernel/order"
 import { isRTL } from "../../foundation/platform/env"
 import { nextTabbable, tabbables } from "../../foundation/focus/tabbable"
@@ -130,16 +129,26 @@ function createFocus(config: {
     },
 
     // Shift+Tab from the item after an open panel goes back into the panel,
-    // as it would if the panel sat right after its trigger in the page.
+    // as it would if the panel sat right after its trigger in the page. Tab
+    // past the last item skips the panel it already went through.
     rootKeydown(event: KeyboardEvent) {
       const value = config.value()
-      if (event.key !== "Tab" || !event.shiftKey || value === null) {
+      if (event.key !== "Tab" || value === null) {
         return
       }
       const panel = config.panel()
       const trigger = config.trigger(value)
       const target = event.target as HTMLElement
       if (!panel || !trigger || panel.contains(target)) {
+        return
+      }
+      if (!event.shiftKey) {
+        const next = nextTabbable(target)
+        const after = nextTabbable(panel, panel)
+        if (next && panel.contains(next) && isAfter(trigger, target) && after) {
+          event.preventDefault()
+          after.focus()
+        }
         return
       }
       // Already between the trigger and here, the browser gets there on its own.
