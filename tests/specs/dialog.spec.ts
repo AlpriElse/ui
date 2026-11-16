@@ -315,6 +315,71 @@ test.describe("focus", () => {
     await expect(field(page)).toBeFocused()
   })
 
+  test("Tab from a last control inside a shadow root wraps to the first, and Shift+Tab comes back to it", async ({
+    page,
+    tab,
+  }) => {
+    await defineElement(
+      page,
+      "x-end",
+      `<button type="button">Inner end</button>`
+    )
+    await openWithKeyboard(page)
+    await dialog(page).evaluate((el) =>
+      el.insertAdjacentHTML("beforeend", `<x-end></x-end>`)
+    )
+    await page.getByRole("button", { name: "Inner end" }).focus()
+    await tab()
+    await expect(field(page)).toBeFocused()
+    await tab({ shift: true })
+    expect(await focusedText(page)).toBe("Inner end")
+  })
+
+  test("Tab wraps past a shadow root that Tab skips, under an inert or tabindex -1 host", async ({
+    page,
+    tab,
+  }) => {
+    await defineElement(
+      page,
+      "x-skipped",
+      `<button type="button">Skipped</button>`
+    )
+    await openWithKeyboard(page)
+    await dialog(page).evaluate((el) =>
+      el.insertAdjacentHTML(
+        "beforeend",
+        `<button type="button">Real end</button><x-skipped tabindex="-1"></x-skipped><div inert><x-skipped></x-skipped></div>`
+      )
+    )
+    await page.getByRole("button", { name: "Real end" }).focus()
+    await tab()
+    await expect(field(page)).toBeFocused()
+    await tab({ shift: true })
+    await expect(page.getByRole("button", { name: "Real end" })).toBeFocused()
+  })
+
+  test("Tab wraps from the last stop of a shadow root that orders a positive tabindex first", async ({
+    page,
+    tab,
+  }) => {
+    await defineElement(
+      page,
+      "x-ordered",
+      `<button type="button">Inner a</button><button type="button" tabindex="1">Inner b</button>`
+    )
+    await openWithKeyboard(page)
+    await dialog(page).evaluate((el) =>
+      el.insertAdjacentHTML("beforeend", `<x-ordered></x-ordered>`)
+    )
+    await page.getByRole("button", { name: "Inner b" }).focus()
+    await tab()
+    expect(await focusedText(page)).toBe("Inner a")
+    await tab()
+    await expect(field(page)).toBeFocused()
+    await tab({ shift: true })
+    expect(await focusedText(page)).toBe("Inner a")
+  })
+
   test("opening focuses the first field even when a later one has a positive tabindex", async ({
     page,
   }) => {
