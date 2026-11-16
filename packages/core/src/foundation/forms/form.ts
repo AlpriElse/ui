@@ -175,6 +175,27 @@ const blocksImplicitSubmission = new Set([
   "number",
 ])
 
+// A Date Input's and Time Input's segments. A browser counts each one as a
+// text field that blocks implicit submission, but a native date input as none.
+const segments = new WeakSet<HTMLInputElement>()
+const nudged = new WeakSet<Event>()
+
+// `form.elements` leaves out image buttons, so this reads the form's tree.
+const defaultButton = (form: HTMLFormElement) =>
+  Array.from(
+    (form.getRootNode() as ParentNode).querySelectorAll<
+      HTMLButtonElement | HTMLInputElement
+    >("button, input[type=submit], input[type=image]")
+  ).find(
+    (el) => el.form === form && (el.type === "submit" || el.type === "image")
+  )
+
+const blocking = (elements: Element[]) =>
+  elements.filter(
+    (el): el is HTMLInputElement =>
+      el instanceof HTMLInputElement && blocksImplicitSubmission.has(el.type)
+  )
+
 // Enter on a checkbox, switch or radio submits its form, like it does on a
 // native one: it clicks the default button, or submits a form without one
 // when nothing else claims Enter.
@@ -182,25 +203,55 @@ function submitImplicitly(form: HTMLFormElement | null | undefined) {
   if (!form) {
     return
   }
-  const elements = Array.from(form.elements)
-  const button = elements.find(
-    (el) =>
-      (el instanceof HTMLButtonElement && el.type === "submit") ||
-      (el instanceof HTMLInputElement &&
-        (el.type === "submit" || el.type === "image"))
-  ) as HTMLButtonElement | HTMLInputElement | undefined
+  const button = defaultButton(form)
   if (button) {
     if (!button.disabled) {
       button.click()
     }
     return
   }
-  const blocking = elements.filter(
-    (el) =>
-      el instanceof HTMLInputElement && blocksImplicitSubmission.has(el.type)
-  )
-  if (blocking.length <= 1) {
+  if (
+    blocking(Array.from(form.elements)).filter((el) => !segments.has(el))
+      .length <= 1
+  ) {
     form.requestSubmit()
+  }
+}
+
+// Enter in a form whose only text field sits beside segments, or in a segment
+// of a form with no other, submits it, which the browser doesn't.
+function bindSegmentSubmit(input: HTMLInputElement) {
+  segments.add(input)
+  const doc = input.ownerDocument
+  const onKeydown = (event: KeyboardEvent) => {
+    const target = event.composedPath()[0]
+    const form = input.form
+    if (
+      !form ||
+      event.key !== "Enter" ||
+      event.defaultPrevented ||
+      event.isComposing ||
+      nudged.has(event) ||
+      !(target instanceof HTMLInputElement) ||
+      target.form !== form ||
+      !blocksImplicitSubmission.has(target.type)
+    ) {
+      return
+    }
+    nudged.add(event)
+    const fields = blocking(Array.from(form.elements))
+    if (
+      !defaultButton(form) &&
+      fields.length > 1 &&
+      fields.filter((el) => !segments.has(el)).length <= 1
+    ) {
+      form.requestSubmit()
+    }
+  }
+  doc.addEventListener("keydown", onKeydown)
+  return () => {
+    segments.delete(input)
+    doc.removeEventListener("keydown", onKeydown)
   }
 }
 
@@ -563,6 +614,7 @@ export {
   type Association,
   attachFormInternals,
   bindHiddenInput,
+  bindSegmentSubmit,
   bindInternals,
   bindValueInput,
   claimInvalidFocus,
