@@ -70,6 +70,7 @@ export {
   valueInputPart,
   warnIfUnnamed,
 } from "./listbox-parts"
+export { bindFieldName, type FieldName, listName } from "./field-name"
 export {
   bindListContent,
   inputState,
