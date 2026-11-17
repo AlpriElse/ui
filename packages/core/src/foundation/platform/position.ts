@@ -628,8 +628,11 @@ function position(
         x: box.x - (parseFloat(style.left) || 0) * scale.x,
         y: box.y - (parseFloat(style.top) || 0) * scale.y,
       }
-      popup.style("left", `${(result.x - origin.x) / scale.x}px`)
-      popup.style("top", `${(result.y - origin.y) / scale.y}px`)
+      // On the device's pixel grid, so text inside renders the same each time.
+      const ratio = el.ownerDocument.defaultView?.devicePixelRatio || 1
+      const snap = (value: number) => Math.round(value * ratio) / ratio
+      popup.style("left", `${snap((result.x - origin.x) / scale.x)}px`)
+      popup.style("top", `${snap((result.y - origin.y) / scale.y)}px`)
     }
     const across = isVertical(result.side) ? scale.x : scale.y
     if (first) {
