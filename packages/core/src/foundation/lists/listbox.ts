@@ -202,6 +202,9 @@ export {
 }
 export {
   flattenData,
+  highlightable,
+  highlightedValue,
+  highlightFromCode,
   itemKey,
   revealInList,
   toListItem,

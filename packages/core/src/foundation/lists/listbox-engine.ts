@@ -956,8 +956,40 @@ function createListboxEngine(
 
 type Listbox = ReturnType<typeof createListboxEngine>
 
+// An item a controller can highlight: enabled, and shown for the query.
+const highlightable = (listbox: Listbox, key: string) =>
+  listbox
+    .entries()
+    .find(
+      (entry) => entry.key === key && !entry.pinned && !listbox.disabled(entry)
+    )
+
+// A controller's highlight: onto an item it can highlight, or off with null.
+// Returns whether it moved.
+function highlightFromCode(
+  listbox: Listbox,
+  key: string | null,
+  current: string | null
+) {
+  if (key === current || (key !== null && !highlightable(listbox, key))) {
+    return false
+  }
+  listbox.highlight(key)
+  return true
+}
+
+// The highlighted item's value for a controller. Null for an action like
+// Create or Select All.
+function highlightedValue(listbox: Listbox, key: string | null) {
+  const entry = listbox.find(key)
+  return entry && !entry.pinned ? (entry.value ?? null) : null
+}
+
 export {
   createListboxEngine,
+  highlightable,
+  highlightedValue,
+  highlightFromCode,
   flattenData,
   isGroup,
   isSeparator,

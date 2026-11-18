@@ -28,6 +28,8 @@ import { dispatchChange, formInternals } from "../../foundation/forms/form"
 import {
   createFilteredListbox,
   flattenData,
+  highlightedValue,
+  highlightFromCode,
   itemKey,
   type ListData,
   type ListEntry,
@@ -865,6 +867,14 @@ function comboboxApiBody(
       settleHighlight()
       return changed
     },
+    getHighlighted: () => highlightedValue(listbox, store.get().highlighted),
+    highlight: (value: unknown) =>
+      store.get().open &&
+      highlightFromCode(
+        listbox,
+        value === null ? null : toKey(value),
+        store.get().highlighted
+      ),
     focus: () => inputElement()?.focus(),
     // Internal. Used by slots and adapters.
     internal: {
