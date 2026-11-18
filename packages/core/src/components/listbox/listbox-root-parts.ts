@@ -27,6 +27,7 @@ import { idPart } from "../../foundation/kernel/attrs"
 import type { SlotFactory } from "../../foundation/kernel/primitive-types"
 import { selects } from "../../foundation/kernel/selects"
 import { live } from "../../foundation/kernel/live"
+import { holdFocus } from "../../foundation/focus/press-keeps-focus"
 
 type ItemProps = ListboxItemProps<unknown> & {
   /** @internal The group the item is in. */
@@ -93,7 +94,8 @@ function isStop(
 }
 
 const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
-  // The listbox itself. It takes focus only to hand it to the option that holds the tab stop.
+  // The listbox itself. It takes focus only to hand it to the option that
+  // holds the tab stop, unless `virtualFocus` keeps focus here.
   root: slot<{}, ListboxState>({
     role: "listbox",
     keys: (state) => [
@@ -115,7 +117,7 @@ const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
       return {
         id: `${id}-listbox`,
         // Never a tab stop of its own, even disabled, when browsers make scrolling containers one.
-        tabindex: "-1",
+        tabindex: state.virtualFocus && !disabled ? "0" : "-1",
         "aria-multiselectable": state.multiple ? "true" : undefined,
         "aria-orientation": state.orientation,
         "aria-disabled": disabled ? "true" : undefined,
@@ -125,6 +127,12 @@ const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
         ...formAttrs(state),
       }
     },
+    live: live((state, { id }) => ({
+      "aria-activedescendant":
+        state.virtualFocus && state.highlighted !== null
+          ? `${id}-option-${idPart(state.highlighted)}`
+          : undefined,
+    })),
     on: {
       keydown: (event, { api, el }) => el && api.internal.onKeyDown(event, el),
       focusin(event, { api, el }) {
@@ -157,7 +165,7 @@ const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
 
   item: slot<ItemProps, ListboxItemState>({
     role: "option",
-    focus: "roving",
+    focus: (state) => (state.virtualFocus ? "active-descendant" : "roving"),
     props: {
       value: "key",
       label: "string",
@@ -176,11 +184,14 @@ const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
       const { selected, disabled } = itemState(state, key, props, api)
       return {
         id: `${id}-option-${idPart(key)}`,
-        tabindex: isDisabled(state)
-          ? undefined
-          : isStop(state, key, props, api)
-            ? "0"
-            : "-1",
+        // With `virtualFocus`, -1 keeps an option that's a link out of the tab order.
+        tabindex: state.virtualFocus
+          ? "-1"
+          : isDisabled(state)
+            ? undefined
+            : isStop(state, key, props, api)
+              ? "0"
+              : "-1",
         "aria-selected": String(selected),
         "aria-disabled": disabled ? "true" : undefined,
         ...positionAttrs(props.index, api.internal.listbox),
@@ -193,14 +204,38 @@ const listboxSlots = (slot: SlotFactory<ListboxStore, ListboxApi>) => ({
     })),
     on: {
       focusin: (event, { api, key }) => api.internal.focused(key),
+      pointermove(event, { api, key, store }) {
+        const { virtualFocus, highlighted } = store.get()
+        if (
+          virtualFocus &&
+          event.pointerType !== "touch" &&
+          highlighted !== null &&
+          highlighted !== key
+        ) {
+          api.internal.highlightVirtually(key, event)
+        }
+      },
+      // With `virtualFocus`, a press keeps focus on the list.
+      pointerdown: (event, context) =>
+        context.store.get().virtualFocus && holdFocus(event, context),
       // Shift with a press selects a range, not the page's text.
-      mousedown(event, { store }) {
-        if (event.shiftKey && store.get().multiple) {
+      mousedown(event, context) {
+        const { shiftKey } = event
+        const { multiple, virtualFocus } = context.store.get()
+        if (virtualFocus) {
+          holdFocus(event, context)
+        } else if (shiftKey && multiple) {
           event.preventDefault()
         }
       },
     },
-    press: ({ api, key }, event) => api.internal.press(key, event),
+    press({ api, key, store }, event) {
+      if (store.get().virtualFocus) {
+        api.internal.focusStop()
+        api.internal.highlightVirtually(key, event)
+      }
+      api.internal.press(key, event)
+    },
     bind: (el, context) => registerItem(el, context),
   }),
 
