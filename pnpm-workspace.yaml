@@ -7,6 +7,9 @@ packages:
   - scripts/typescript7
 allowBuilds:
   esbuild: true
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
 
 catalog:
   "@playwright/test": ^1.63.0
