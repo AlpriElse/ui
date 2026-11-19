@@ -21,6 +21,7 @@ import {
   ref,
   release,
   renderVersion,
+  runBindWrites,
   sameSlotState,
   sameValue,
   schemaOf,
@@ -260,6 +261,10 @@ function usePrimitive<P extends Primitive>(
       })
     }
   }, [instance])
+
+  // Once every part in the commit bound, StrictMode's rebinds too: their store
+  // writes land before a synchronous `act()` returns, so it leaves none for after.
+  React.useEffect(() => runBindWrites())
 
   // One object for the instance's life, so context consumers never re-render
   // because of it. Parts subscribe to what they render through usePart.

@@ -1,3 +1,4 @@
+import { afterBind } from "../../foundation/kernel/after-bind"
 import {
   claimInvalidFocus,
   componentFlagOf,
@@ -251,7 +252,7 @@ function fieldApiBody(
       register(list: "labels" | "descriptions" | "errors", partId: string) {
         let active = true
         let added = false
-        queueMicrotask(() => {
+        afterBind(() => {
           if (active) {
             added = true
             store.set({ [list]: [...store.get()[list], partId] })
@@ -259,7 +260,7 @@ function fieldApiBody(
         })
         return () => {
           active = false
-          queueMicrotask(() => {
+          afterBind(() => {
             const items = store.get()[list]
             const index = items.indexOf(partId)
             if (added && index !== -1) {
@@ -335,7 +336,7 @@ function fieldApiBody(
         // <label for> and drop the button's text, so the label activates it itself.
         const namedByContent =
           el instanceof HTMLButtonElement && !el.hasAttribute("role")
-        queueMicrotask(() =>
+        afterBind(() =>
           store.set({
             controlId: el.id || null,
             labelable: isLabelable(el) && !namedByContent,
@@ -365,7 +366,7 @@ function fieldApiBody(
     hush()
     // The control points at the parts that registered from now on, a
     // microtask later like their registering.
-    queueMicrotask(() => store.set({ bound: true }))
+    afterBind(() => store.set({ bound: true }))
     const form = () => {
       const control = controlsIn(el)[0]
       return (formInternals(control)?.form ??
