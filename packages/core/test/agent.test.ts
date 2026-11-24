@@ -3232,6 +3232,175 @@ describe("agent act", () => {
     ])
   })
 
+  test("a step's change commits once, like a drag that ended or text typed and left", async () => {
+    const agent = createAgent()
+    const onSeats = vi.fn()
+    const seats = slider({
+      id: "seats",
+      defaultValue: 70,
+      onValueCommit: onSeats,
+    })
+    const root = document.body.appendChild(document.createElement("div"))
+    root.setAttribute("aria-label", "Seats")
+    const onPrice = vi.fn()
+    const price = numberInput({
+      id: "price",
+      defaultValue: 70,
+      onValueCommit: onPrice,
+    })
+    const field = document.body.appendChild(document.createElement("input"))
+    field.setAttribute("aria-label", "Price")
+    cleanups.push(
+      bind(seats.part("root"), root),
+      bind(price.part("control"), field),
+      () => seats.destroy(),
+      () => price.destroy()
+    )
+    const heard: unknown[] = []
+    cleanups.push(
+      agent.subscribe((change) => heard.push([change.label, change.value]))
+    )
+    const outcome = await agent.act({
+      steps: [
+        { ref: "Seats", action: "setValue", args: [30] },
+        { ref: "Price", action: "setValue", args: [30] },
+        { ref: "Price", action: "increment" },
+      ],
+    })
+    expect(outcome.ok).toBe(true)
+    expect(onSeats.mock.calls).toEqual([
+      [30, { reason: "imperative", source: "agent", thumb: null }],
+    ])
+    expect(onPrice.mock.calls).toEqual([
+      [30, { reason: "imperative", source: "agent" }],
+      [31, { reason: "imperative", source: "agent" }],
+    ])
+    expect(heard).toEqual([
+      ["Seats", 30],
+      ["Price", 30],
+      ["Price", 31],
+    ])
+  })
+
+  test("a change that didn't take, or one code makes, commits nothing", async () => {
+    const agent = createAgent()
+    const onValueCommit = vi.fn()
+    const instance = slider({ id: "seats", value: 70, onValueCommit })
+    const root = document.body.appendChild(document.createElement("div"))
+    root.setAttribute("aria-label", "Seats")
+    cleanups.push(bind(instance.part("root"), root), () => instance.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Seats", action: "setValue", args: [30] }],
+    })
+    expect(outcome.error?.message).toMatch(/didn't take: it is still 70/)
+    instance.setOptions({ id: "seats", onValueCommit })
+    instance.api.setValue(40)
+    expect(instance.get().value).toBe(40)
+    expect(onValueCommit).not.toHaveBeenCalled()
+    const price = numberInput({ id: "price", value: 70, onValueCommit })
+    const field = document.body.appendChild(document.createElement("input"))
+    field.setAttribute("aria-label", "Price")
+    cleanups.push(bind(price.part("control"), field), () => price.destroy())
+    await agent.act({ steps: [{ ref: "Price", action: "increment" }] })
+    expect(price.get().value).toBe(70)
+    expect(onValueCommit).not.toHaveBeenCalled()
+  })
+
+  test("what a private field's commit throws reads redacted, and a public field's reads as it is", async () => {
+    const agent = createAgent()
+    const mount = (label: string, parent: Element) => {
+      const instance = numberInput({
+        id: label.toLowerCase(),
+        defaultValue: 1,
+        onValueCommit: () => {
+          throw new Error(`${label} 4242 was refused`)
+        },
+      })
+      const field = parent.appendChild(document.createElement("input"))
+      field.setAttribute("aria-label", label)
+      cleanups.push(bind(instance.part("control"), field), () =>
+        instance.destroy()
+      )
+      return instance
+    }
+    const region = document.body.appendChild(document.createElement("div"))
+    region.setAttribute("data-agent-secret", "")
+    cleanups.push(() => region.remove())
+    const pin = mount("Pin", region)
+    const seats = mount("Seats", document.body)
+    const set = (ref: string) =>
+      agent.act({ steps: [{ ref, action: "setValue", args: [2] }] })
+    const secret = await set("Pin")
+    expect(secret.error?.message).toMatch(
+      /^The commit of Pin \(c\d+\) failed: \[redacted\]$/
+    )
+    expect(JSON.stringify(secret)).not.toContain("4242")
+    expect(pin.get().value).toBe(2)
+    expect((await set("Seats")).error?.message).toBe("Seats 4242 was refused")
+    expect(seats.get().value).toBe(2)
+  })
+
+  test("only the component a step names commits, so a private one its callback mounts and changes commits nothing", async () => {
+    const agent = createAgent()
+    const region = document.body.appendChild(document.createElement("div"))
+    region.setAttribute("data-agent-secret", "")
+    cleanups.push(() => region.remove())
+    const onLimitCommit = vi.fn(() => {
+      throw new Error("Limit 4242 was refused")
+    })
+    let limit: ReturnType<typeof numberInput> | undefined
+    const mountLimit = () => {
+      const instance = numberInput({
+        id: "limit",
+        defaultValue: 1,
+        onValueCommit: onLimitCommit,
+      })
+      const field = region.appendChild(document.createElement("input"))
+      field.setAttribute("aria-label", "Limit")
+      cleanups.push(bind(instance.part("control"), field), () =>
+        instance.destroy()
+      )
+      return instance
+    }
+    const onValueCommit = vi.fn()
+    const seats = slider({
+      id: "seats",
+      defaultValue: 1,
+      onValueCommit,
+      onValueChange: (value) => {
+        limit ??= mountLimit()
+        limit.api.setValue((value as number) * 10)
+      },
+    })
+    const root = document.body.appendChild(document.createElement("div"))
+    root.setAttribute("aria-label", "Seats")
+    cleanups.push(bind(seats.part("root"), root), () => seats.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Seats", action: "setValue", args: [2] }],
+    })
+    expect(JSON.stringify(outcome)).not.toContain("4242")
+    expect(outcome.ok).toBe(true)
+    expect(limit!.get().value).toBe(20)
+    expect(onLimitCommit).not.toHaveBeenCalled()
+    expect(onValueCommit).toHaveBeenCalledTimes(1)
+  })
+
+  test("a step that fails after it moved the value still commits where it landed", async () => {
+    const agent = createAgent()
+    const onValueCommit = vi.fn()
+    const instance = slider({ id: "seats", defaultValue: 12, onValueCommit })
+    const root = document.body.appendChild(document.createElement("div"))
+    root.setAttribute("aria-label", "Seats")
+    cleanups.push(bind(instance.part("root"), root), () => instance.destroy())
+    const outcome = await agent.act({
+      steps: [{ ref: "Seats", action: "setValue", args: [2.5] }],
+    })
+    expect(outcome.error?.message).toMatch(/took 3, not 2\.5/)
+    expect(onValueCommit.mock.calls).toEqual([
+      [3, { reason: "imperative", source: "agent", thumb: null }],
+    ])
+  })
+
   test("a slider given text takes the number in it", async () => {
     const agent = createAgent()
     const instance = slider({
