@@ -65,9 +65,9 @@ async function mount(root: HTMLElement) {
     listen(waterfall, env)
     if (variant.controller) {
       env.controls([
-        ["expandAll()", () => waterfall.api.expandAll()],
-        ["collapseAll()", () => waterfall.api.collapseAll()],
-        ["reveal('flags')", () => waterfall.api.reveal("flags")],
+        ["expandAll()", () => waterfall.api?.expandAll()],
+        ["collapseAll()", () => waterfall.api?.collapseAll()],
+        ["reveal('flags')", () => waterfall.api?.reveal("flags")],
       ])
     }
   })
