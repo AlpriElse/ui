@@ -79,3 +79,34 @@ test("every waterfall kitchen sink variant renders its rows", async ({
 
   expect(errors).toEqual([])
 })
+
+test("the controller buttons throw nothing when pressed before the waterfall element is defined", async ({
+  page,
+  framework,
+}) => {
+  test.skip(framework !== "web", "Only web components define their element.")
+  // Holds the definition back, the window a slow network gives between the
+  // buttons appearing and the element upgrading.
+  await page.addInitScript(() => {
+    const define = customElements.define.bind(customElements)
+    customElements.define = (name, ...rest) =>
+      name === "ui-waterfall"
+        ? void setTimeout(() => define(name, ...rest), 1000)
+        : define(name, ...rest)
+  })
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+
+  await page.goto("/?fixture=waterfall-kitchen-sink&framework=web")
+  await page.locator("body[data-mounted]").waitFor({ state: "attached" })
+  const controller = page.locator('[data-variant="controller"]')
+  await controller.scrollIntoViewIfNeeded()
+  for (const name of ["expandAll()", "collapseAll()", "reveal('flags')"]) {
+    await controller.getByRole("button", { name }).click()
+  }
+  expect(await page.evaluate(() => !!customElements.get("ui-waterfall"))).toBe(
+    false
+  )
+
+  expect(errors).toEqual([])
+})
