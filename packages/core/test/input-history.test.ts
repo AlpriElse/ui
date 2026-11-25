@@ -255,4 +255,36 @@ describe("entries with keys", () => {
     keyed.press()
     expect(keyed.written).toEqual(["three", "two", "one"])
   })
+
+  test("removing the entry brought back keeps its place, and the draft comes back after the entries below it", () => {
+    let messages = [
+      { id: "m1", text: "one" },
+      { id: "m2", text: "two" },
+    ]
+    let value: Message = { id: "draft", text: "dra" }
+    const history = createInputHistory<Message>({
+      entries: () => messages.map((m) => ({ ...m })),
+      read: () => value,
+      write: (next) => {
+        value = next
+      },
+      atEdge: () => true,
+      getEntryKey: (m) => m.id,
+    })
+    const press = (key: string) =>
+      history.keydown({
+        key,
+        target: null,
+        preventDefault() {},
+      } as unknown as KeyboardEvent)
+    press("ArrowUp")
+    press("ArrowUp")
+    expect(value.text).toBe("one")
+    messages = [{ id: "m2", text: "two" }]
+    expect(press("ArrowUp")).toBe(false)
+    press("ArrowDown")
+    expect(value.text).toBe("two")
+    press("ArrowDown")
+    expect(value.text).toBe("dra")
+  })
 })

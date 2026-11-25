@@ -88,16 +88,22 @@ function createInputHistory<T>(options: InputHistoryOptions<T>) {
   let seen: readonly T[] = []
   // The index shown, where `seen.length` is the value being typed.
   let at = 0
+  // The entry shown was removed: the field holds text no entry keeps, and
+  // `at` is the entry after it, so the next key steps from between the two.
+  let removed = false
   const edits = new Map<number, T>()
 
   function reset() {
     seen = [...(options.entries() ?? [])]
     at = seen.length
+    removed = false
     edits.clear()
   }
 
   // Keeps the value shown, and edits to values brought back, on their keys.
   function follow(entries: readonly T[], key: (entry: T) => string) {
+    const before = seen.map(key)
+    const from = at
     const shown = at < seen.length ? key(seen[at]) : undefined
     const edited = new Map<string, T>()
     for (const [index, value] of edits) {
@@ -118,8 +124,15 @@ function createInputHistory<T>(options: InputHistoryOptions<T>) {
     if (typing) {
       edits.set(seen.length, draft as T)
     }
-    const index = seen.findIndex((entry) => key(entry) === shown)
-    at = index === -1 ? seen.length : index
+    const keys = seen.map(key)
+    const index = shown === undefined ? -1 : keys.indexOf(shown)
+    if (shown === undefined || index !== -1) {
+      at = index === -1 ? seen.length : index
+      return
+    }
+    const after = before.slice(from + 1).find((k) => keys.includes(k))
+    at = after === undefined ? seen.length : keys.indexOf(after)
+    removed = true
   }
 
   function step(by: -1 | 1, event: KeyboardEvent) {
@@ -131,16 +144,19 @@ function createInputHistory<T>(options: InputHistoryOptions<T>) {
         reset()
       }
     }
-    const next = at + by
+    const next = removed && by === 1 ? at : at + by
     if (next < 0 || next > seen.length) {
       return false
     }
-    edits.set(at, options.read())
+    if (!removed) {
+      edits.set(at, options.read())
+    }
     const value = edits.has(next) ? (edits.get(next) as T) : seen[next]
     if (options.write(value, event) === false) {
       return false
     }
     at = next
+    removed = false
     const field = textFieldOf(event)
     field?.setSelectionRange(field.value.length, field.value.length)
     return true
